@@ -1,9 +1,12 @@
 import java.io.*;
 import java.net.*;
+import java.util.*;
 
 public class ClientHandler extends Thread {
     Socket socket;
     String name;
+    String identifier;
+    int mode;
     DataInputStream in;
     DataOutputStream out;
 
@@ -34,18 +37,23 @@ public class ClientHandler extends Thread {
             in = new DataInputStream(socket.getInputStream());
             out = new DataOutputStream(socket.getOutputStream());
 
-            name = in.readUTF();  // El cliente debe enviar su nombre al conectar
-            Server.clients.put(name, this);
-            System.out.println("Conectado: " + name);
+            mode = Integer.parseInt(in.readUTF());  // Cliente envía 1 o 2
+            identifier = in.readUTF();              // Nombre único (modo 1) o grupo (modo 2)
+            name = identifier + "_" + UUID.randomUUID();  // Internamente es único
+
+            Server.groups.putIfAbsent(identifier, new ArrayList<>());
+            Server.groups.get(identifier).add(this);
+
+            System.out.println("Conectado: " + name + " en modo " + mode);
 
             while (true) {
-                String command = in.readUTF(); // MSG|destino|contenido o FILE|destino|nombre.ext
+                String command = in.readUTF();
 
                 if (command.startsWith("MSG|")) {
                     String[] parts = command.split("\\|", 3);
                     String to = parts[1];
                     String message = parts[2];
-                    Server.broadcast(name, to, message);
+                    Server.broadcast(name, to, message, mode);
 
                 } else if (command.startsWith("FILE|")) {
                     String[] parts = command.split("\\|", 3);
@@ -54,7 +62,7 @@ public class ClientHandler extends Thread {
                     int size = in.readInt();
                     byte[] data = new byte[size];
                     in.readFully(data);
-                    Server.sendFile(name, to, filename, data);
+                    Server.sendFile(name, to, filename, data, mode);
                 }
             }
 
@@ -62,7 +70,12 @@ public class ClientHandler extends Thread {
             System.out.println(name + " desconectado.");
         } finally {
             try {
-                Server.clients.remove(name);
+                if (Server.groups.containsKey(identifier)) {
+                    Server.groups.get(identifier).remove(this);
+                    if (Server.groups.get(identifier).isEmpty()) {
+                        Server.groups.remove(identifier);
+                    }
+                }
                 socket.close();
             } catch (IOException ignored) {}
         }
